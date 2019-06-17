@@ -29,6 +29,9 @@
     <ClCompile Include="src\CTestFilter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\MediaConvert.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="CTestFilter.def">
@@ -36,9 +39,6 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="src\MediaConvert.cpp">
-      <Filter>Source Files</Filter>
-    </CudaCompile>
     <CudaCompile Include="src\cuda_search.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>

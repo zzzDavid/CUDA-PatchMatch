@@ -52,7 +52,8 @@ __global__ void integer_patch_match(unsigned char* in0_gpu, const int width, con
 	motion_y[block_y_idx][block_x_idx] = y;
 }
 
-__global__ void interpolate_patch_match()
+__global__ void interpolate_patch_match(unsigned char* in0_gpu, const int width, const int height, const int blockw,
+	const int blockh, const int regionw, const int regionh, float** motion_x, float** motion_y, int interpolate)
 {
 
 }
@@ -85,7 +86,7 @@ int cuda_full_search(unsigned char *out_gpu, unsigned char *in0_gpu, unsigned ch
 
 	int blockwf = 2;				// search block width of interpolation search
 	int blockhf = 2;				// search block height of interpolation search
-	int interprate = 2;				// interpolate rate
+	int interpolate = 2;				// interpolate rate
 	int regionwf = 16;				// search region width of interpolation search
 	int regionhf = 16;				// search region height of interpolation search
 
@@ -101,7 +102,8 @@ int cuda_full_search(unsigned char *out_gpu, unsigned char *in0_gpu, unsigned ch
 	dim3 threadsPerBlock(bnumy, bnumx);
 	integer_patch_match <<<1, threadsPerBlock>>> (in0_gpu, width, height, blockw, blockh, regionw, regionh, motion_x, motion_y);
 
-	interpolate_patch_match <<<1, 1>>>();
+	/* Parallel Interpolate Patch Match */
+	interpolate_patch_match <<<1, threadsPerBlock>>>(in0_gpu, width, height, blockwf, blockhf, regionwf, regionhf, motion_x, motion_y, interpolate);
 
 	// explicitly free resources
 	cudaDeviceReset();
