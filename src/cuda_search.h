@@ -4,5 +4,5 @@
 #include "device_launch_parameters.h"
 #include "iostream"
 
-__global__ void sayHelloWorld();
+__device__ float SAD(unsigned char* patch_header, unsigned char* block_header, int blockw, int blockh, int width, int height);
 
