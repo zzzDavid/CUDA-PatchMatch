@@ -368,7 +368,7 @@ HRESULT CTestFilter::Receive(IMediaSample *pSample)
 	  pSample->GetPointer(&pBuffer);
 	  BYTE *pPrevBuffer;
 	  pPrevFrame->GetPointer(&pPrevBuffer);
-	  motion_search(pBuffer, pSourceBuffer, pPrevBuffer, m_iWidth, m_iHeight);
+	  full_search(pBuffer, pSourceBuffer, pPrevBuffer, m_iWidth, m_iHeight);
 	  count++;
 	  pPrevFrame = pSample;
   }

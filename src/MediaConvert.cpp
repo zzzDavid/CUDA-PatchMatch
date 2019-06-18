@@ -12,6 +12,7 @@
 #include "MediaConvert.h"
 #include <iostream>
 #include "cuda_search.h"
+#include "cuda_runtime.h"
 
 using namespace std;
 
@@ -356,4 +357,33 @@ float SAD(int** currentBlock, int** searchBlock, int width, int height)
 		}
 	}
 	return sum;
+}
+
+int full_search(unsigned char *out, unsigned char *in0, unsigned char *in1, int width, int height)
+{
+	// Allocate vectors in device memory
+	size_t size = width * height * 2 * sizeof(unsigned char);
+	unsigned char* out_gpu;
+	cudaMalloc(&out_gpu, size);
+	unsigned char* in0_gpu;
+	cudaMalloc(&in0_gpu, size);
+	unsigned char* in1_gpu;
+	cudaMalloc(&in1_gpu, size);
+
+	// Copy data from host memory to device memory
+	cudaMemcpy(in0, in0_gpu, size, cudaMemcpyHostToDevice);
+	cudaMemcpy(in1, in1_gpu, size, cudaMemcpyHostToDevice);
+	cudaMemcpy(out, out_gpu, size, cudaMemcpyHostToDevice);
+
+	cuda_full_search(out_gpu, in0_gpu, in1_gpu, width, height);
+
+	// Copy data from device memory to host memory
+	cudaMemcpy(out_gpu, out, size, cudaMemcpyDeviceToHost);
+
+	// Free device memory
+	cudaFree(out_gpu);
+	cudaFree(in0_gpu);
+	cudaFree(in1_gpu);
+
+	return 0;
 }

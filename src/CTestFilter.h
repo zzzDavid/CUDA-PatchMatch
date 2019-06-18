@@ -75,7 +75,7 @@ protected:
 
   //
   IMediaSample    *pPrevFrame;
-  int			   count;
+  int			   count = 0;
 };
 
 #endif // __CTESTFILTER_H__

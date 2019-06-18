@@ -31,6 +31,9 @@ int getInterpolatePixel(int** im, int width, int height, float y_index, float x_
 
 float SAD(int** currentBlock, int** searchBlock, int width, int height);
 
+int full_search(unsigned char *out, unsigned char *in0, unsigned char *in1, int width, int height);
+
+
 const double PI = 3.14159265358979;
 const int Zig_Zag[8][8] = {
 	{ 0,1,5,6,14,15,27,28 },

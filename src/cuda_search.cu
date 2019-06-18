@@ -232,21 +232,30 @@ int cuda_full_search(unsigned char *out_gpu, unsigned char *in0_gpu, unsigned ch
 		motion_x[i] = new float[bnumx];
 	float **motion_y = new float*[bnumy];				// y motion vector for each block,  2D float array
 	for (int i = 0; i < bnumy; i++)
-		motion_y[i] = new float[bnumx];					
+		motion_y[i] = new float[bnumx];	
 
 	/* Parallel Integer Patch Match */
-	dim3 threadsPerBlock(bnumy, bnumx);
-	integer_patch_match <<<1, threadsPerBlock>>> (in0_gpu, width, height, blockw, blockh, regionw, regionh, motion_x, motion_y);
+	dim3 threadsPerBlock(bnumy, bnumx, 1);
+	integer_patch_match << <1, threadsPerBlock >> > (in0_gpu, width, height, blockw, blockh, regionw, regionh, motion_x, motion_y);
 
 	/* Parallel Interpolate Patch Match */
-	interpolate_patch_match <<<1, threadsPerBlock>>>(in0_gpu, width, height, blockw, blockh, blockwf, blockhf,
+	interpolate_patch_match << <1, threadsPerBlock >> > (in0_gpu, width, height, blockw, blockh, blockwf, blockhf,
 		regionwf, regionhf, motion_x, motion_y, interpolate);
 
 	/* Move pixels from prev frame to current frame */
+	move_pixel << <1, threadsPerBlock >> > (in1_gpu, out_gpu, blockw, blockh, width, height, interpolate, motion_x, motion_y);
 
-
-	// explicitly free resources
-	cudaDeviceReset();
+	// DEBUG 
+	// check motion_x and motion y
+	for (int i = 0; i < bnumy; i++)
+	{
+		for (int j = 0; j < bnumx; j++)
+		{
+			float x = motion_x[i][j];
+			float y = motion_y[i][j];
+			printf("float x = %f, float y = %f", x, y);
+		}
+	}
 
 	return 0;
 }
