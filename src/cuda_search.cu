@@ -114,6 +114,32 @@ __global__ void interpolate_patch_match(unsigned char* in0_gpu, const int width,
 	motion_y[block_y_idx][block_x_idx] += y;
 }
 
+__global__ void move_pixel(unsigned char* prev_frame, unsigned char* curr_frame, const int blockw, const int blockh, const int width, const int height, int r, float** motion_x, float** motion_y)
+{
+	// the block that this thread is responsible for
+	int block_x_idx = threadIdx.x;
+	int block_y_idx = threadIdx.y;
+	// destination block pixel index
+	int dst_x = block_x_idx * blockw;
+	int dst_y = block_y_idx * blockh;
+
+	// get integer motion vector
+	float mv_x = motion_x[block_y_idx][block_x_idx];
+	float mv_y = motion_y[block_y_idx][block_x_idx];
+	// source block pixel index
+	float src_x = dst_x + mv_x;
+	float src_y = dst_y + mv_y;
+
+	// move pixels
+	for (int j = 0; j < blockh; j++)
+	{
+		for (int i = 0; i < blockw; i++)
+		{
+			*(curr_frame + 2 * dst_y * width + 2 * dst_x) = (unsigned char)get_interpolated_pixel(prev_frame, r, width, height, src_x, src_y);
+		}
+	}
+}
+
 __device__ float SAD(unsigned char* patch_header, unsigned char* block_header, int blockw, int blockh, int width, int height)
 {
 	float sum = 0;
@@ -215,6 +241,9 @@ int cuda_full_search(unsigned char *out_gpu, unsigned char *in0_gpu, unsigned ch
 	/* Parallel Interpolate Patch Match */
 	interpolate_patch_match <<<1, threadsPerBlock>>>(in0_gpu, width, height, blockw, blockh, blockwf, blockhf,
 		regionwf, regionhf, motion_x, motion_y, interpolate);
+
+	/* Move pixels from prev frame to current frame */
+
 
 	// explicitly free resources
 	cudaDeviceReset();
