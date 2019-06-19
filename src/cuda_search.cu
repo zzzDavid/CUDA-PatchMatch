@@ -1,8 +1,9 @@
 #include "cuda_search.h"
+#define Clip3(a, b, c) ((c < a) ? a : ((c > b) ? b : c))
+#define Clip1(x)       Clip3(0, 255, x)
 
-
-__global__ void integer_patch_match(unsigned char* in0_gpu, const int width, const int height, const int blockw,
-	const int blockh, const int regionw, const int regionh, float** motion_x, float** motion_y) 
+__global__ void integer_patch_match(unsigned char* in0_gpu, unsigned char* in1_gpu, const int width, const int height, const int blockw,
+	const int blockh, const int regionw, const int regionh, float* motion_x, float* motion_y, int bnumx) 
 {
 	int block_x_idx = threadIdx.x;
 	int block_y_idx = threadIdx.y;
@@ -19,7 +20,7 @@ __global__ void integer_patch_match(unsigned char* in0_gpu, const int width, con
 	startIdx_y = startIdx_y > 0 ? startIdx_y : 0;
 	endIdx_x = endIdx_x < width ? endIdx_x : width;
 	endIdx_y = endIdx_y < height ? endIdx_y : height;
-	unsigned char* region_head = in0_gpu + 2 * startIdx_y * width + 2 * startIdx_x;
+	unsigned char* region_head = in1_gpu + 2 * startIdx_y * width + 2 * startIdx_x;
 	int region_actual_w = endIdx_x - startIdx_x + 1;
 	int region_actual_h = endIdx_y - startIdx_y + 1;
 	// block location relative to region (in pixel)
@@ -30,9 +31,9 @@ __global__ void integer_patch_match(unsigned char* in0_gpu, const int width, con
 	float min_sad = 0;
 	int x = 0;
 	int y = 0;
-	for (int j = 0; j < region_actual_h - blockh + 1; j++)
+	for (int j = 0; j < region_actual_h - blockh + 1; j+=2)
 	{
-		for (int i = 0; i < region_actual_w - blockw + 1; i++)
+		for (int i = 0; i < region_actual_w - blockw + 1; i+=2)
 		{
 			unsigned char* patch_head = region_head + 2 * j * width + 2 * i;
 			// calculate SAD
@@ -48,19 +49,20 @@ __global__ void integer_patch_match(unsigned char* in0_gpu, const int width, con
 		}
 	}
 	
-	motion_x[block_y_idx][block_x_idx] = x;
-	motion_y[block_y_idx][block_x_idx] = y;
+	*(motion_x + bnumx * block_y_idx + block_x_idx) = x;
+	*(motion_y + bnumx * block_y_idx + block_x_idx) = y;
 }
 
-__global__ void interpolate_patch_match(unsigned char* in0_gpu, const int width, const int height, const int blockw,
-	const int blockh, const int blockwf, const int blockhf, const int regionwf, const int regionhf, float** motion_x, float** motion_y, int interpolate)
+__global__ void interpolate_patch_match(unsigned char* in0_gpu, unsigned char* in1_gpu, const int width, const int height, const int blockw,
+	const int blockh, const int blockwf, const int blockhf, const int regionwf, const int regionhf, float* motion_x, 
+	float* motion_y, int interpolate, int bnumx)
 {
 	int block_x_idx = threadIdx.x;
 	int block_y_idx = threadIdx.y;
 
 	// get integer motion vector
-	float mv_x = motion_x[block_y_idx][block_x_idx];
-	float mv_y = motion_y[block_y_idx][block_x_idx];
+	float mv_x = *(motion_x + bnumx * block_y_idx + block_x_idx);
+	float mv_y = *(motion_y + bnumx * block_y_idx + block_x_idx);
 
 	// get block head pointer
 	int bx = block_x_idx * blockw + (blockw - blockwf) / 2;
@@ -77,7 +79,7 @@ __global__ void interpolate_patch_match(unsigned char* in0_gpu, const int width,
 	startIdx_y = startIdx_y > 0 ? startIdx_y : 0;
 	endIdx_x = endIdx_x < width ? endIdx_x : width;
 	endIdx_y = endIdx_y < height ? endIdx_y : height;
-	unsigned char* region_head = in0_gpu + 2 * startIdx_y * width + 2 * startIdx_x; // the head pointer of search region
+	unsigned char* region_head = in1_gpu + 2 * startIdx_y * width + 2 * startIdx_x; // the head pointer of search region
 	int region_actual_w = endIdx_x - startIdx_x + 1;
 	int region_actual_h = endIdx_y - startIdx_y + 1;
 	// block location relative to region (in pixel)
@@ -103,18 +105,19 @@ __global__ void interpolate_patch_match(unsigned char* in0_gpu, const int width,
 				min_sad = sad;
 			else if (sad < min_sad)
 			{
-				x = (i - relative_x) / 2;
-				y = (j - relative_y) / 2;
+				x = (i - relative_x) / interpolate;
+				y = (j - relative_y) / interpolate;
 				min_sad = sad;
 			}
 		}
 	}
 
-	motion_x[block_y_idx][block_x_idx] += x;
-	motion_y[block_y_idx][block_x_idx] += y;
+	*(motion_x + bnumx * block_y_idx + block_x_idx) += 0;
+	*(motion_y + bnumx * block_y_idx + block_x_idx) += 0;
 }
 
-__global__ void move_pixel(unsigned char* prev_frame, unsigned char* curr_frame, const int blockw, const int blockh, const int width, const int height, int r, float** motion_x, float** motion_y)
+__global__ void move_pixel(unsigned char* prev_frame, unsigned char* curr_frame, const int blockw, const int blockh,
+	const int width, const int height, int r, float* motion_x, float* motion_y, int bnumx)
 {
 	// the block that this thread is responsible for
 	int block_x_idx = threadIdx.x;
@@ -122,20 +125,28 @@ __global__ void move_pixel(unsigned char* prev_frame, unsigned char* curr_frame,
 	// destination block pixel index
 	int dst_x = block_x_idx * blockw;
 	int dst_y = block_y_idx * blockh;
+	unsigned char* dst_header = curr_frame + 2 * dst_y * width + 2 * dst_x;
 
 	// get integer motion vector
-	float mv_x = motion_x[block_y_idx][block_x_idx];
-	float mv_y = motion_y[block_y_idx][block_x_idx];
+	float mv_x = *(motion_x + bnumx * block_y_idx + block_x_idx);
+	float mv_y = *(motion_y + bnumx * block_y_idx + block_x_idx);
 	// source block pixel index
 	float src_x = dst_x + mv_x;
 	float src_y = dst_y + mv_y;
+	unsigned char* src_header = prev_frame + 2 * int(src_y) * width + 2 * int(src_x);
 
 	// move pixels
 	for (int j = 0; j < blockh; j++)
 	{
 		for (int i = 0; i < blockw; i++)
 		{
-			*(curr_frame + 2 * dst_y * width + 2 * dst_x) = (unsigned char)get_interpolated_pixel(prev_frame, r, width, height, src_x, src_y);
+			//*(curr_frame + 2 * (dst_y + j) * width + 2 * (dst_x + i)) = 
+				//(unsigned char)get_interpolated_pixel(prev_frame, r, width, height, src_y + j, src_x + i);
+			if (src_x > width || src_y > height)
+				*(dst_header + 2 * width * j + 2 * i) = (unsigned char)0;
+			else
+				//*(dst_header + 2 * width * j + 2 * i) = (unsigned char)*(src_header + 2 * width * j + 2 * i);
+				*(dst_header + 2 * width * j + 2 * i) = (unsigned)Clip1(get_interpolated_pixel(prev_frame, r, width, height, (src_y + j)*r, (src_x + i)*r));
 		}
 	}
 }
@@ -186,13 +197,13 @@ __device__ float get_interpolated_pixel(unsigned char* im_header, int r, int wid
 	{
 		pixel = (int)*(im_header + 2 * h * width + w * 2);
 	}
-	else if (x % 2 == 0 && y % 2 != 0)
+	else if (x % r == 0 && y % r != 0)
 	{
 		pixel += (int)*(im_header + 2 * h * width + w * 2);
 		pixel += (h + 1 >= height) ? 0 : (int)*(im_header + 2 * (h+1) * width + w * 2);
 		pixel = (int)(pixel * 0.5);
 	}
-	else if (x % 2 != 0 && y % 2 == 0)
+	else if (x % r != 0 && y % r == 0)
 	{
 		pixel += (int)*(im_header + 2 * h * width + w * 2);
 		pixel += (w + 1 >= width) ? 0 : (int)*(im_header + 2 * h * width + (w+1) * 2);
@@ -218,7 +229,7 @@ int cuda_full_search(unsigned char *out_gpu, unsigned char *in0_gpu, unsigned ch
 	int bnumx = width / blockw;		// block number in x direction
 	int bnumy = height / blockh;	// block number in y direction
 	int regionw = 16 * 3;			// block search region width
-	int regionh = 16 * 3;			// block search region heigt
+	int regionh = 16 * 3;			// block search region height
 
 	int blockwf = 2;				// search block width of interpolation search
 	int blockhf = 2;				// search block height of interpolation search
@@ -227,35 +238,26 @@ int cuda_full_search(unsigned char *out_gpu, unsigned char *in0_gpu, unsigned ch
 	int regionhf = 16;				// search region height of interpolation search
 
 	/* Motion Vectors Initialization */
-	float **motion_x = new float*[bnumy];				// x motion vector for each block,  2D float array
-	for (int i = 0; i < bnumy; i++)
-		motion_x[i] = new float[bnumx];
-	float **motion_y = new float*[bnumy];				// y motion vector for each block,  2D float array
-	for (int i = 0; i < bnumy; i++)
-		motion_y[i] = new float[bnumx];	
+	float* motion_x;										// x motion vector for each block,  float array
+	cudaMalloc(&motion_x, bnumy * bnumx * sizeof(float));
+	float* motion_y;										// y motion vector for each block,  float array
+	cudaMalloc(&motion_y, bnumy * bnumx * sizeof(float));
 
 	/* Parallel Integer Patch Match */
-	dim3 threadsPerBlock(bnumy, bnumx, 1);
-	integer_patch_match << <1, threadsPerBlock >> > (in0_gpu, width, height, blockw, blockh, regionw, regionh, motion_x, motion_y);
+	dim3 threadsPerBlock(bnumx, bnumy);
+	integer_patch_match <<<1, threadsPerBlock >>> (in0_gpu, in1_gpu, width, height, blockw, blockh, regionw, regionh, motion_x, motion_y, bnumx);
 
 	/* Parallel Interpolate Patch Match */
-	interpolate_patch_match << <1, threadsPerBlock >> > (in0_gpu, width, height, blockw, blockh, blockwf, blockhf,
-		regionwf, regionhf, motion_x, motion_y, interpolate);
+	interpolate_patch_match <<<1, threadsPerBlock >>> (in0_gpu, in1_gpu, width, height, blockw, blockh, blockwf, blockhf,
+		regionwf, regionhf, motion_x, motion_y, interpolate, bnumx);
 
 	/* Move pixels from prev frame to current frame */
-	move_pixel << <1, threadsPerBlock >> > (in1_gpu, out_gpu, blockw, blockh, width, height, interpolate, motion_x, motion_y);
+	move_pixel <<<1, threadsPerBlock >>> (in1_gpu, out_gpu, blockw, blockh, width, height, interpolate, motion_x, motion_y, bnumx);
 
-	// DEBUG 
-	// check motion_x and motion y
-	for (int i = 0; i < bnumy; i++)
-	{
-		for (int j = 0; j < bnumx; j++)
-		{
-			float x = motion_x[i][j];
-			float y = motion_y[i][j];
-			printf("float x = %f, float y = %f", x, y);
-		}
-	}
+
+	// Free memory
+	cudaFree(motion_x);
+	cudaFree(motion_y);
 
 	return 0;
 }
